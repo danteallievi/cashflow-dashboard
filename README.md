@@ -1,143 +1,119 @@
-:root {
-  --ink: #f1eee5;
-  --muted: #96998e;
-  --dim: #60645c;
-  --bg: #0a0b09;
-  --panel: rgba(20, 22, 18, 0.88);
-  --panel-solid: #141612;
-  --line: rgba(241, 238, 229, 0.11);
-  --line-strong: rgba(241, 238, 229, 0.2);
-  --orange: #f7931a;
-  --orange-soft: #ffb75c;
-  --acid: #c9ff58;
-  --green: #70dc94;
-  --red: #ff766f;
-  --amber: #e9b963;
-  --serif: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
-  --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
-  --mono: "SFMono-Regular", "Cascadia Mono", "Liberation Mono", monospace;
-}
+# Satoshi Ledger
 
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
+Un dashboard local y **read-only** para consultar, en un solo lugar, posiciones y actividad de [Binance](https://www.binance.com/) y [BingX](https://bingx.com/).
 
-html { background: var(--bg); scroll-behavior: smooth; }
+Está pensado como una vista personal de portfolio: muestra balances Spot, costo promedio, posiciones abiertas, PnL y el historial de futuros sin enviar órdenes ni exponer las API keys al navegador.
 
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-  color: var(--ink);
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px),
-    var(--bg);
-  background-size: 56px 56px;
-  font-family: var(--sans);
-  font-size: 16px;
-  -webkit-font-smoothing: antialiased;
-}
+> Proyecto personal en desarrollo. No es asesoramiento financiero ni reemplaza los datos oficiales del exchange.
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.06;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
-}
+## Qué incluye
 
-button, a { -webkit-tap-highlight-color: transparent; }
+| Sección | Información |
+| --- | --- |
+| **Dashboard** | BTC Spot, costo promedio, equity estimado y posiciones abiertas. |
+| **Open Positions** | Binance USD-M/COIN-M y BingX Perpetual, con PnL individual y total. |
+| **Spot History** | Holdings Spot, precio promedio de compra e historial disponible. |
+| **Trading History** | Cierres de futuros, ganancias, pérdidas, fees y resultado neto. |
+| **Actualización automática** | Snapshot inicial y refresco cada minuto mientras la pestaña está visible. |
 
-.ambient {
-  position: fixed;
-  z-index: -2;
-  width: 42rem;
-  height: 42rem;
-  border-radius: 50%;
-  filter: blur(120px);
-  opacity: 0.07;
-  pointer-events: none;
-}
+Las posiciones con PnL positivo se destacan progresivamente a partir de **10%**, **15%** y **20%** para facilitar el seguimiento visual.
 
-.ambient-one { top: -20rem; right: -10rem; background: var(--orange); }
-.ambient-two { top: 45%; left: -25rem; background: var(--acid); opacity: 0.035; }
+## Cómo funciona
 
-.shell { width: min(1760px, calc(100% - 64px)); margin: 0 auto; padding: 28px 0 48px; }
+```mermaid
+flowchart LR
+    Browser[Dashboard en el navegador]
+    Server[Servidor local Express]
+    Env[Credenciales en .env]
+    Binance[Binance API]
+    BingX[BingX API]
 
-.masthead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 72px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--line);
-}
+    Browser -->|GET /api/dashboard| Server
+    Env -->|solo backend| Server
+    Server -->|consultas read-only| Binance
+    Server -->|consultas read-only| BingX
+```
 
-.brand { display: inline-flex; gap: 14px; align-items: center; color: inherit; text-decoration: none; }
+- El servidor escucha únicamente en `127.0.0.1`.
+- Las credenciales se leen desde `.env` en el backend.
+- El navegador recibe datos normalizados, nunca las API keys o secrets.
+- No hay base de datos ni almacenamiento remoto propio.
+- El botón **Update** permite actualizar manualmente en cualquier momento.
 
-.coin-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid rgba(247, 147, 26, 0.5);
-  border-radius: 50%;
-  color: var(--orange);
-  background: rgba(247, 147, 26, 0.08);
-  box-shadow: inset 0 0 0 5px rgba(247, 147, 26, 0.035);
-  font: 600 23px/1 var(--serif);
-}
+## Requisitos
 
-.brand-copy { display: flex; flex-direction: column; gap: 3px; }
-.eyebrow, .section-kicker, .section-index, .metric-label, .sync-label {
-  color: var(--muted);
-  font: 600 12px/1.2 var(--mono);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-.wordmark { font: 600 20px/1 var(--serif); letter-spacing: 0.02em; }
+- Node.js 20 o superior.
+- API keys de Binance y/o BingX con permisos exclusivamente de lectura.
 
-.masthead-actions { display: flex; align-items: center; gap: 24px; }
-.sync-copy { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.sync-copy time { color: #c7c9c1; font: 500 13px/1 var(--mono); }
+## Instalación
 
-.update-button {
-  position: relative;
-  display: inline-flex;
-  min-width: 142px;
-  height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 3px;
-  color: #131009;
-  background: var(--orange);
-  box-shadow: 0 12px 34px rgba(247, 147, 26, 0.15);
-  cursor: pointer;
-  font: 800 13px/1 var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
-}
+```bash
+git clone https://github.com/danteallievi/cashflow-dashboard.git
+cd cashflow-dashboard
+npm install
+cp .env.example .env
+```
 
-.update-button::after {
-  content: "";
-  position: absolute;
-  inset: 4px;
-  border: 1px solid rgba(40, 26, 7, 0.18);
-  pointer-events: none;
-}
+Completá en `.env` solamente los exchanges que quieras consultar:
 
-.update-button:hover:not(:disabled) { transform: translateY(-2px); background: #ffa632; box-shadow: 0 16px 40px rgba(247, 147, 26, 0.23); }
-.update-button:active:not(:disabled) { transform: translateY(0); }
-.update-button:focus-visible { outline: 2px solid var(--acid); outline-offset: 4px; }
-.update-button:disabled { cursor: wait; opacity: 0.76; }
-.refresh-icon { width: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.is-loading .refresh-icon { animation: spin 850ms linear infinite; }
+```dotenv
+PORT=3000
 
-.app-layout { display: grid; grid-template-columns: 240px minmax(0, 1440px); gap: 28px; justify-content: center; }
-.app-content { min-width: 0; }
-.primary-navigation { position: sticky; top: 24px; align-self: start; margin-top: 32px; padding: 14px
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+
+BINGX_API_KEY=
+BINGX_API_SECRET=
+```
+
+Después iniciá la aplicación:
+
+```bash
+npm start
+```
+
+Abrí [http://localhost:3000](http://localhost:3000).
+
+## Seguridad
+
+Este proyecto está diseñado para ejecutarse localmente, pero la seguridad final también depende de cómo configures tus cuentas:
+
+1. Creá keys nuevas para este dashboard.
+2. Habilitá únicamente permisos de lectura.
+3. **Nunca habilites trading ni retiros.**
+4. Si el exchange lo permite, restringí las keys por IP.
+5. No compartas, subas ni copies tu archivo `.env`.
+6. Si una key alguna vez aparece en Git, revocala; borrarla de un commit posterior no es suficiente.
+
+`.env` y `node_modules/` están excluidos mediante `.gitignore`. El archivo `.env.example` contiene solamente nombres de variables y puede mantenerse público.
+
+## Cómo se calcula el PnL abierto total
+
+Para poder combinar mercados distintos se usa USD como unidad común:
+
+- **USD-M y Perpetual:** el PnL informado en USD/USDT se suma directamente.
+- **COIN-M:** el PnL nativo en BTC se convierte a USD usando el mark price disponible.
+- También se muestra un equivalente total en BTC usando el precio de referencia actual.
+
+El resultado es una estimación al mark price y puede diferir del cierre efectivo por fees, funding, slippage o cambios de precio.
+
+## Tests
+
+```bash
+npm test
+```
+
+## Estructura
+
+```text
+public/          interfaz del dashboard
+src/exchanges/   clientes read-only de Binance y BingX
+src/services/    normalización y cálculos de portfolio/PnL
+src/utils/       HTTP, firmas, números y errores seguros
+test/            tests con Node Test Runner
+```
+
+## Privacidad
+
+Los datos se consultan directamente desde este servidor local hacia los exchanges configurados. No se incluyen analytics, trackers ni servicios externos propios. Revisá siempre el código y los permisos de tus keys antes de ejecutar una herramienta financiera.
+
