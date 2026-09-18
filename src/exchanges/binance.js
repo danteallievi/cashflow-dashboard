@@ -1,223 +1,330 @@
-:root {
-  --ink: #f1eee5;
-  --muted: #96998e;
-  --dim: #60645c;
-  --bg: #0a0b09;
-  --panel: rgba(20, 22, 18, 0.88);
-  --panel-solid: #141612;
-  --line: rgba(241, 238, 229, 0.11);
-  --line-strong: rgba(241, 238, 229, 0.2);
-  --orange: #f7931a;
-  --orange-soft: #ffb75c;
-  --acid: #c9ff58;
-  --green: #70dc94;
-  --red: #ff766f;
-  --amber: #e9b963;
-  --serif: "Iowan Old Style", "Baskerville", "Times New Roman", serif;
-  --sans: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
-  --mono: "SFMono-Regular", "Cascadia Mono", "Liberation Mono", monospace;
+import { safeError } from '../utils/errors.js';
+import { fetchJson } from '../utils/http.js';
+import { signBinanceParams } from '../utils/signing.js';
+import { toNumber } from '../utils/numbers.js';
+import {
+  normalizeBinanceCoinMPosition,
+  normalizeBinanceUsdtMPosition,
+} from '../services/positions.js';
+import { includeTrackedBtc } from '../services/spotPortfolio.js';
+
+const SPOT_BASE = 'https://api.binance.com';
+const COIN_M_BASE = 'https://dapi.binance.com';
+const USDT_M_BASE = 'https://fapi.binance.com';
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 100;
+const STABLE_ASSETS = new Set(['USD', 'USDT', 'USDC', 'FDUSD']);
+const USD_QUOTES = ['USDT', 'USDC', 'FDUSD'];
+const lastGoodComponents = new Map();
+const HISTORY_LOOKBACK_DAYS = 90;
+const HISTORY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_HISTORY_PAGES = 100;
+
+function credentials() {
+  const apiKey = process.env.BINANCE_API_KEY?.trim();
+  const secret = process.env.BINANCE_API_SECRET?.trim();
+  if (!apiKey || !secret) throw new Error('Binance read-only API credentials are not configured.');
+  return { apiKey, secret };
 }
 
-* { box-sizing: border-box; }
-[hidden] { display: none !important; }
-
-html { background: var(--bg); scroll-behavior: smooth; }
-
-body {
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-  color: var(--ink);
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px),
-    var(--bg);
-  background-size: 56px 56px;
-  font-family: var(--sans);
-  font-size: 16px;
-  -webkit-font-smoothing: antialiased;
+async function signedRequest(baseUrl, path, params = {}) {
+  const { apiKey, secret } = credentials();
+  const query = signBinanceParams(
+    { ...params, recvWindow: 5000, timestamp: Date.now() },
+    secret,
+  );
+  return fetchJson(`${baseUrl}${path}?${query}`, {
+    exchange: 'Binance',
+    headers: { 'X-MBX-APIKEY': apiKey },
+  });
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: 0.06;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.7'/%3E%3C/svg%3E");
+export async function getBinanceBtcPrice() {
+  const payload = await fetchJson(`${SPOT_BASE}/api/v3/ticker/price?symbol=BTCUSDT`, {
+    exchange: 'Binance',
+  });
+  const price = toNumber(payload.price);
+  if (!price) throw new Error('Binance returned an invalid BTC price.');
+  return price;
 }
 
-button, a { -webkit-tap-highlight-color: transparent; }
-
-.ambient {
-  position: fixed;
-  z-index: -2;
-  width: 42rem;
-  height: 42rem;
-  border-radius: 50%;
-  filter: blur(120px);
-  opacity: 0.07;
-  pointer-events: none;
+export async function getBinanceSpotBalances() {
+  const payload = await signedRequest(SPOT_BASE, '/api/v3/account', { omitZeroBalances: true });
+  return (payload.balances || [])
+    .map((balance) => ({
+      asset: String(balance.asset || '').toUpperCase(),
+      quantity: toNumber(balance.free) + toNumber(balance.locked),
+    }))
+    .filter((balance) => balance.asset && balance.quantity > 0);
 }
 
-.ambient-one { top: -20rem; right: -10rem; background: var(--orange); }
-.ambient-two { top: 45%; left: -25rem; background: var(--acid); opacity: 0.035; }
-
-.shell { width: min(1760px, calc(100% - 64px)); margin: 0 auto; padding: 28px 0 48px; }
-
-.masthead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 72px;
-  padding-bottom: 24px;
-  border-bottom: 1px solid var(--line);
+export async function getBinanceSpotPrices() {
+  const payload = await fetchJson(`${SPOT_BASE}/api/v3/ticker/price`, {
+    exchange: 'Binance',
+  });
+  if (!Array.isArray(payload)) throw new Error('Binance returned an invalid Spot price list.');
+  return new Map(payload.map((ticker) => [ticker.symbol, toNumber(ticker.price)]));
 }
 
-.brand { display: inline-flex; gap: 14px; align-items: center; color: inherit; text-decoration: none; }
-
-.coin-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid rgba(247, 147, 26, 0.5);
-  border-radius: 50%;
-  color: var(--orange);
-  background: rgba(247, 147, 26, 0.08);
-  box-shadow: inset 0 0 0 5px rgba(247, 147, 26, 0.035);
-  font: 600 23px/1 var(--serif);
+function usdPairs(asset, prices) {
+  return USD_QUOTES
+    .map((quote) => ({ symbol: `${asset}${quote}`, quote }))
+    .filter(({ symbol }) => prices.get(symbol) > 0);
 }
 
-.brand-copy { display: flex; flex-direction: column; gap: 3px; }
-.eyebrow, .section-kicker, .section-index, .metric-label, .sync-label {
-  color: var(--muted);
-  font: 600 12px/1.2 var(--mono);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-.wordmark { font: 600 20px/1 var(--serif); letter-spacing: 0.02em; }
+export async function getBinanceSpotTrades(symbol, asset) {
+  const trades = [];
+  let fromId = 0;
+  let complete = false;
 
-.masthead-actions { display: flex; align-items: center; gap: 24px; }
-.sync-copy { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.sync-copy time { color: #c7c9c1; font: 500 13px/1 var(--mono); }
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const payload = await signedRequest(SPOT_BASE, '/api/v3/myTrades', {
+      symbol,
+      fromId,
+      limit: PAGE_SIZE,
+    });
+    if (!Array.isArray(payload)) throw new Error('Binance returned an invalid Spot trade list.');
 
-.update-button {
-  position: relative;
-  display: inline-flex;
-  min-width: 142px;
-  height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 3px;
-  color: #131009;
-  background: var(--orange);
-  box-shadow: 0 12px 34px rgba(247, 147, 26, 0.15);
-  cursor: pointer;
-  font: 800 13px/1 var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
-}
+    trades.push(...payload);
+    if (payload.length < PAGE_SIZE) {
+      complete = true;
+      break;
+    }
+    fromId = Math.max(...payload.map((trade) => Number(trade.id))) + 1;
+  }
 
-.update-button::after {
-  content: "";
-  position: absolute;
-  inset: 4px;
-  border: 1px solid rgba(40, 26, 7, 0.18);
-  pointer-events: none;
+  const normalized = trades.map((trade) => ({
+    id: String(trade.id),
+    exchange: 'binance',
+    timestamp: Number(trade.time),
+    side: trade.isBuyer ? 'BUY' : 'SELL',
+    asset,
+    quantity: toNumber(trade.qty),
+    priceUsd: toNumber(trade.price),
+    fee: toNumber(trade.commission),
+    feeAsset: trade.commissionAsset,
+  }));
+
+  console.info(`[binance] ${normalized.length} ${asset} spot trades loaded`);
+  return { trades: normalized, complete };
 }
 
-.update-button:hover:not(:disabled) { transform: translateY(-2px); background: #ffa632; box-shadow: 0 16px 40px rgba(247, 147, 26, 0.23); }
-.update-button:active:not(:disabled) { transform: translateY(0); }
-.update-button:focus-visible { outline: 2px solid var(--acid); outline-offset: 4px; }
-.update-button:disabled { cursor: wait; opacity: 0.76; }
-.refresh-icon { width: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.is-loading .refresh-icon { animation: spin 850ms linear infinite; }
+export async function getBinanceSpotPortfolio() {
+  const [balances, prices] = await Promise.all([
+    getBinanceSpotBalances(),
+    getBinanceSpotPrices(),
+  ]);
+  const assets = [];
+  const warnings = [];
 
-.app-layout { display: grid; grid-template-columns: 240px minmax(0, 1440px); gap: 28px; justify-content: center; }
-.app-content { min-width: 0; }
-.primary-navigation { position: sticky; top: 24px; align-self: start; margin-top: 32px; padding: 14px; border: 1px solid var(--line); background: rgba(14,16,12,.86); box-shadow: 0 24px 70px rgba(0,0,0,.2); backdrop-filter: blur(20px); }
-.nav-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 5px 14px; border-bottom: 1px solid var(--line); }
-.nav-heading span { color: var(--orange-soft); font: 700 10px/1 var(--mono); letter-spacing: .14em; }
-.nav-heading small { color: var(--dim); font: 600 9px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; }
-.primary-tabs { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
-.primary-tab { position: relative; display: grid; min-width: 0; min-height: 72px; grid-template-columns: 34px minmax(0,1fr) 18px; gap: 10px; align-items: center; padding: 13px 12px; border: 1px solid var(--line); border-radius: 2px; color: var(--muted); background: rgba(255,255,255,.012); cursor: pointer; text-align: left; transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 160ms ease; }
-.primary-tab::before { content: ""; position: absolute; top: 10px; bottom: 10px; left: -1px; width: 2px; background: transparent; transition: background 160ms ease; }
-.nav-index { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--dim); font: 700 9px/1 var(--mono); transition: color 160ms ease, border-color 160ms ease, background 160ms ease; }
-.nav-copy { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
-.nav-copy strong { color: currentColor; font: 700 10.5px/1.2 var(--mono); letter-spacing: .02em; text-transform: uppercase; }
-.nav-copy small { color: var(--dim); font: 500 9px/1 var(--mono); letter-spacing: .02em; white-space: nowrap; }
-.nav-arrow { color: var(--dim); font: 500 16px/1 var(--mono); transition: color 160ms ease, transform 160ms ease; }
-.primary-tab:hover { color: var(--ink); border-color: rgba(247,147,26,.34); background: rgba(247,147,26,.045); transform: translateX(2px); }
-.primary-tab:hover .nav-arrow { color: var(--orange-soft); transform: translateX(2px); }
-.primary-tab:focus-visible { outline: 2px solid var(--acid); outline-offset: 3px; }
-.primary-tab.is-active { color: var(--ink); border-color: rgba(247,147,26,.46); background: linear-gradient(90deg, rgba(247,147,26,.12), rgba(247,147,26,.025)); }
-.primary-tab.is-active::before { background: var(--orange); }
-.primary-tab.is-active .nav-index { border-color: rgba(247,147,26,.55); color: var(--orange); background: rgba(247,147,26,.09); }
-.primary-tab.is-active .nav-arrow { color: var(--orange); transform: translateX(2px); }
-.nav-hint { margin: 14px 5px 2px; color: var(--dim); font: 500 9px/1.55 var(--mono); }
-.nav-hint span { color: var(--orange); }
-.page-view[hidden] { display: none; }
-.page-view.is-active { animation: view-in 360ms both cubic-bezier(.22,1,.36,1); }
+  const trackedAssets = includeTrackedBtc(
+    balances.filter(({ asset }) => !STABLE_ASSETS.has(asset)),
+  );
 
-.spot-page-intro { display: grid; grid-template-columns: 1fr minmax(320px, .72fr); gap: 80px; align-items: end; padding: 60px 28px 44px; }
-.spot-page-intro h1 { margin: 0; font: 500 clamp(44px, 5vw, 70px)/.96 var(--serif); letter-spacing: -.045em; }
-.spot-page-intro h1 em { color: var(--muted); font-weight: 400; }
-.spot-page-intro > p { max-width: 540px; margin: 0 0 4px; color: var(--muted); font-size: 16px; line-height: 1.6; }
-.trading-page-intro h1 em { color: var(--orange-soft); }
+  for (const balance of trackedAssets) {
+    const pairs = usdPairs(balance.asset, prices);
+    const pricePair = pairs[0] || null;
+    let trades = [];
+    let historyComplete = false;
 
-.trading-scoreboard {
-  display: grid;
-  grid-template-columns: minmax(320px, .8fr) 1.45fr;
-  border: 1px solid var(--line-strong);
-  background: rgba(12, 14, 11, .72);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, .18);
-}
-.trading-net-card { position: relative; display: flex; min-height: 260px; flex-direction: column; justify-content: center; padding: 34px 38px; overflow: hidden; border-right: 1px solid var(--line-strong); }
-.trading-net-card::before { content: ""; position: absolute; inset: 0; opacity: .6; pointer-events: none; background: radial-gradient(circle at 0 0, rgba(247,147,26,.13), transparent 62%); }
-.trading-net-card > * { position: relative; }
-.trading-net-card strong { margin: 25px 0 13px; font: 600 clamp(36px, 4.2vw, 62px)/.92 var(--mono); letter-spacing: -.07em; }
-.trading-net-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.trading-net-card.is-positive strong { color: var(--green); }
-.trading-net-card.is-negative strong { color: var(--red); }
-.result-rule { height: 3px; margin-top: 30px; overflow: hidden; background: var(--line); }
-.result-rule span { display: block; width: 0; height: 100%; background: var(--muted); transition: width 700ms cubic-bezier(.22,1,.36,1); }
-.trading-net-card.is-positive .result-rule span { background: var(--green); }
-.trading-net-card.is-negative .result-rule span { background: var(--red); }
-.trading-stat-grid { display: grid; grid-template-columns: 1fr 1fr; }
-.trading-stat { position: relative; display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 28px 30px; border-left: 1px solid var(--line); border-top: 1px solid var(--line); }
-.trading-stat:nth-child(-n + 2) { border-top: 0; }
-.trading-stat:nth-child(odd) { border-left: 0; }
-.trading-stat > span { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
-.trading-stat strong { overflow: hidden; margin: 13px 0 8px; font: 600 clamp(20px, 2vw, 29px)/1 var(--mono); letter-spacing: -.045em; text-overflow: ellipsis; white-space: nowrap; }
-.trading-stat:nth-child(1) strong { color: var(--green); }
-.trading-stat:nth-child(2) strong { color: var(--red); }
-.trading-stat small { color: var(--dim); font-size: 11px; }
-.trading-history-panel { margin-top: 18px; }
-.trading-history-heading { align-items: flex-end; gap: 24px; }
-.trading-filters { display: flex; align-items: flex-end; gap: 12px; }
-.trading-history-summary span:last-child { color: var(--muted); }
-.trading-history-table td:last-child { background: rgba(255, 255, 255, .012); }
-.trading-history-table .order-id { color: var(--orange-soft); }
-.trading-method-note { margin: 0; padding: 17px 28px 20px; border-top: 1px solid var(--line); color: var(--dim); font-size: 12px; line-height: 1.55; }
+    if (pairs.length) {
+      const histories = await Promise.allSettled(
+        pairs.map(({ symbol }) => getBinanceSpotTrades(symbol, balance.asset)),
+      );
+      historyComplete = histories.every(
+        (result) => result.status === 'fulfilled' && result.value.complete,
+      );
+      for (let index = 0; index < histories.length; index += 1) {
+        const result = histories[index];
+        if (result.status === 'fulfilled') {
+          trades.push(...result.value.trades);
+        } else {
+          warnings.push(`Binance ${pairs[index].symbol} Spot: ${safeError(result.reason)}`);
+        }
+      }
+    } else {
+      warnings.push(`Binance ${balance.asset} Spot: no hay un mercado USD compatible para valuarla.`);
+    }
 
-.hero {
-  display: grid;
-  grid-template-columns: 0.8fr 1.65fr;
-  gap: 70px;
-  align-items: end;
-  padding: 66px 0 58px;
+    assets.push({
+      exchange: 'binance',
+      asset: balance.asset,
+      quantity: balance.quantity,
+      currentPriceUsd: pricePair ? prices.get(pricePair.symbol) : null,
+      quoteAsset: pricePair?.quote || null,
+      trades,
+      historyComplete,
+    });
+  }
+
+  return { assets, warnings };
 }
 
-.section-kicker { margin: 0 0 18px; color: var(--orange-soft); }
-.hero h1 {
-  max-width: 580px;
-  margin: 0;
-  font: 500 clamp(42px, 4.6vw, 72px)/0.97 var(--serif);
-  letter-spacing: -0.045em;
+export async function getBinanceCoinMAccount() {
+  const payload = await signedRequest(COIN_M_BASE, '/dapi/v1/balance');
+  const btc = payload.find((balance) => balance.asset === 'BTC');
+  return toNumber(btc?.balance);
 }
-.hero h1 em { color: var(--muted);
+
+export async function getBinanceCoinMPositions() {
+  const [positions, exchangeInfo] = await Promise.all([
+    signedRequest(COIN_M_BASE, '/dapi/v1/positionRisk'),
+    fetchJson(`${COIN_M_BASE}/dapi/v1/exchangeInfo`, { exchange: 'Binance' }),
+  ]);
+  const contracts = new Map(
+    (exchangeInfo.symbols || []).map((symbol) => [symbol.symbol, toNumber(symbol.contractSize)]),
+  );
+  return positions
+    .map((position) => normalizeBinanceCoinMPosition(position, contracts))
+    .filter(Boolean);
+}
+
+export async function getBinanceUsdtMPositions() {
+  const positions = await signedRequest(USDT_M_BASE, '/fapi/v3/positionRisk');
+  return positions.map(normalizeBinanceUsdtMPosition).filter(Boolean);
+}
+
+function normalizeIncomeRecord(record, marketType) {
+  return {
+    exchange: 'binance',
+    marketType,
+    symbol: record.symbol || '—',
+    incomeType: record.incomeType,
+    amount: record.income,
+    asset: record.asset,
+    timestamp: Number(record.time),
+    transactionId: String(record.tranId ?? ''),
+    tradeId: String(record.tradeId ?? ''),
+  };
+}
+
+async function getBinanceIncomeHistory(baseUrl, path, marketType, startAt, endAt) {
+  const records = [];
+  let complete = true;
+
+  for (let windowStart = startAt; windowStart <= endAt; windowStart += HISTORY_WINDOW_MS) {
+    const windowEnd = Math.min(endAt, windowStart + HISTORY_WINDOW_MS - 1);
+
+    for (let page = 1; page <= MAX_HISTORY_PAGES; page += 1) {
+      const payload = await signedRequest(baseUrl, path, {
+        startTime: windowStart,
+        endTime: windowEnd,
+        limit: PAGE_SIZE,
+        page,
+      });
+      if (!Array.isArray(payload)) throw new Error(`Binance returned an invalid ${marketType} income history.`);
+
+      records.push(...payload.map((record) => normalizeIncomeRecord(record, marketType)));
+      if (payload.length < PAGE_SIZE) break;
+      if (page === MAX_HISTORY_PAGES) complete = false;
+    }
+  }
+
+  return { records, complete };
+}
+
+export async function getBinanceTradingHistory() {
+  const endAt = Date.now();
+  const startAt = endAt - HISTORY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+  const histories = await Promise.allSettled([
+    getBinanceIncomeHistory(USDT_M_BASE, '/fapi/v1/income', 'USD-M', startAt, endAt),
+    getBinanceIncomeHistory(COIN_M_BASE, '/dapi/v1/income', 'COIN-M', startAt, endAt),
+  ]);
+  const labels = ['USD-M', 'COIN-M'];
+  const warnings = [];
+  const records = [];
+  let complete = true;
+
+  histories.forEach((history, index) => {
+    if (history.status === 'fulfilled') {
+      records.push(...history.value.records);
+      complete &&= history.value.complete;
+      return;
+    }
+
+    complete = false;
+    warnings.push(`Binance ${labels[index]} Trading History: ${safeError(history.reason)}`);
+  });
+
+  if (histories.every((history) => history.status === 'rejected')) {
+    throw new Error('Binance trading history requests failed.');
+  }
+
+  console.info(`[binance] ${records.length} derivative income records loaded`);
+  return {
+    records,
+    complete,
+    days: HISTORY_LOOKBACK_DAYS,
+    startAt: new Date(startAt).toISOString(),
+    endAt: new Date(endAt).toISOString(),
+    warnings,
+  };
+}
+
+export async function getBinanceSnapshot() {
+  credentials();
+  const requests = {
+    spotPortfolio: getBinanceSpotPortfolio(),
+    coinMBalance: getBinanceCoinMAccount(),
+    coinMPositions: getBinanceCoinMPositions(),
+    usdtMPositions: getBinanceUsdtMPositions(),
+    tradingHistory: getBinanceTradingHistory(),
+  };
+  const names = Object.keys(requests);
+  const results = await Promise.allSettled(Object.values(requests));
+  const resolved = Object.fromEntries(names.map((name, index) => [name, results[index]]));
+  const successes = results.filter((result) => result.status === 'fulfilled').length;
+  if (!successes) throw new Error('All Binance account requests failed.');
+
+  const warnings = [];
+  for (const [name, result] of Object.entries(resolved)) {
+    if (result.status === 'fulfilled') {
+      lastGoodComponents.set(name, result.value);
+    } else {
+      const suffix = lastGoodComponents.has(name) ? ' Se mantiene el último dato válido.' : '';
+      warnings.push(`Binance ${name}: ${safeError(result.reason)}${suffix}`);
+    }
+  }
+
+  const component = (name, fallback) => (
+    resolved[name].status === 'fulfilled' ? resolved[name].value : lastGoodComponents.get(name) ?? fallback
+  );
+  const spotPortfolio = component('spotPortfolio', { assets: [], warnings: [] });
+  const spotBtc = spotPortfolio.assets.find(({ asset }) => asset === 'BTC');
+  warnings.push(...spotPortfolio.warnings);
+  const tradingHistory = component('tradingHistory', {
+    records: [],
+    complete: false,
+    days: HISTORY_LOOKBACK_DAYS,
+    startAt: null,
+    endAt: null,
+    warnings: [],
+  });
+  warnings.push(...tradingHistory.warnings);
+
+  console.info('[binance] balances fetched');
+  return {
+    updatedAt: new Date().toISOString(),
+    holdings: [
+      {
+        exchange: 'binance',
+        accountType: 'spot',
+        btc: spotBtc?.quantity || 0,
+      },
+      {
+        exchange: 'binance',
+        accountType: 'coin-m',
+        btc: component('coinMBalance', 0),
+      },
+    ],
+    trades: spotBtc?.trades || [],
+    tradesComplete: spotBtc?.historyComplete ?? false,
+    spotAssets: spotPortfolio.assets,
+    positions: [
+      ...component('coinMPositions', []),
+      ...component('usdtMPositions', []),
+    ],
+    tradingHistory,
+    warnings,
+  };
+}

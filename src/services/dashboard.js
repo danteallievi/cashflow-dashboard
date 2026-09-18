@@ -1,165 +1,227 @@
-<!doctype html>
-<html lang="es">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#0a0b09" />
-    <title>Satoshi Ledger — Crypto Dashboard Local</title>
-    <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml" sizes="any" />
-    <link rel="stylesheet" href="/styles.css?v=1.7.0" />
-    <script src="/app.js?v=1.7.0" defer></script>
-  </head>
-  <body>
-    <div class="ambient ambient-one"></div>
-    <div class="ambient ambient-two"></div>
+import { getBinanceBtcPrice, getBinanceSnapshot } from '../exchanges/binance.js';
+import { getBingxSnapshot } from '../exchanges/bingx.js';
+import { calculateAssetAverageCost, calculateAverageCost } from './costBasis.js';
+import { buildPurchaseHistory } from './purchases.js';
+import { calculateBtcOverview } from './btcOverview.js';
+import { buildTradingHistory } from './tradingHistory.js';
+import { nearlyEqual, round } from '../utils/numbers.js';
+import { safeError } from '../utils/errors.js';
 
-    <main class="shell">
-      <header class="masthead reveal">
-        <a class="brand" href="#" aria-label="Satoshi Ledger, inicio">
-          <span class="coin-mark" aria-hidden="true">₿</span>
-          <span class="brand-copy">
-            <span class="eyebrow">Local / Read only</span>
-            <span class="wordmark">Satoshi Ledger</span>
-          </span>
-        </a>
+const cache = {
+  market: null,
+  binance: null,
+  bingx: null,
+};
 
-        <div class="masthead-actions">
-          <div class="sync-copy">
-            <span class="sync-label">Última actualización</span>
-            <time id="updated-at">Todavía no actualizaste</time>
-          </div>
-          <button id="update-button" class="update-button" type="button">
-            <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
-            </svg>
-            <span>Update</span>
-          </button>
-        </div>
-      </header>
+function sourceResult(name, result, now) {
+  if (result.status === 'fulfilled') {
+    cache[name] = result.value;
+    return {
+      snapshot: result.value,
+      status: { ok: true, stale: false, updatedAt: result.value.updatedAt || now, error: null },
+    };
+  }
 
-      <div class="app-layout">
-        <aside class="primary-navigation reveal delay-1" aria-label="Navegación principal">
-          <div class="nav-heading">
-            <span>MAIN MENU</span>
-            <small>3 secciones</small>
-          </div>
-          <nav class="primary-tabs" role="tablist" aria-label="Secciones principales">
-            <button id="dashboard-tab" class="primary-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="dashboard-view" data-view="dashboard">
-              <span class="nav-index">01</span>
-              <span class="nav-copy"><strong>Dashboard</strong><small>Resumen general</small></span>
-              <span class="nav-arrow" aria-hidden="true">→</span>
-            </button>
-            <button id="spot-history-tab" class="primary-tab" type="button" role="tab" aria-selected="false" aria-controls="spot-history-view" data-view="spot-history">
-              <span class="nav-index">02</span>
-              <span class="nav-copy"><strong>Spot History</strong><small>Compras y costos</small></span>
-              <span class="nav-arrow" aria-hidden="true">→</span>
-            </button>
-            <button id="trading-history-tab" class="primary-tab" type="button" role="tab" aria-selected="false" aria-controls="trading-history-view" data-view="trading-history">
-              <span class="nav-index">03</span>
-              <span class="nav-copy"><strong>Trading History</strong><small>Cierres y PnL</small></span>
-              <span class="nav-arrow" aria-hidden="true">→</span>
-            </button>
-          </nav>
-          <p class="nav-hint"><span aria-hidden="true">↳</span> Elegí una sección para navegar.</p>
-        </aside>
+  const previous = cache[name];
+  return {
+    snapshot: previous,
+    status: {
+      ok: false,
+      stale: Boolean(previous),
+      updatedAt: previous?.updatedAt || null,
+      error: safeError(result.reason),
+    },
+  };
+}
 
-        <div class="app-content">
-          <section class="source-strip global-source-strip reveal delay-1" aria-label="Estado de actualización de fuentes" aria-live="polite">
-            <div class="source-heading">
-              <span class="section-index">LIVE</span>
-              <span>Fuentes</span>
-            </div>
-            <div id="source-binance" class="source-pill is-idle">
-              <span class="source-logo binance-logo">B</span>
-              <span class="source-name">Binance</span>
-              <span class="source-state">En espera</span>
-            </div>
-            <div id="source-bingx" class="source-pill is-idle">
-              <span class="source-logo bingx-logo">X</span>
-              <span class="source-name">BingX</span>
-              <span class="source-state">En espera</span>
-            </div>
-            <span class="source-aside">Estado del último Update · visible en todas las secciones</span>
-          </section>
+function calculateSpot(spotBtc, trades, btcPriceUsd, warnings) {
+  const basis = calculateAverageCost(trades);
+  warnings.push(...basis.warnings);
 
-      <div id="dashboard-view" class="page-view is-active" role="tabpanel" aria-labelledby="dashboard-tab">
-      <section class="hero reveal delay-1" aria-labelledby="portfolio-title">
-        <div class="hero-intro">
-          <p class="section-kicker">Portfolio snapshot</p>
-          <h1 id="portfolio-title">Tu Bitcoin en Spot,<br /><em>sin ruido.</em></h1>
-          <p id="hero-status" class="hero-status">Presioná Update para consultar tus cuentas.</p>
-        </div>
+  if (!nearlyEqual(spotBtc, basis.trackedBtc, 0.0000001)) {
+    warnings.push(
+      'El balance Spot real no coincide con el historial de trades disponible. El precio promedio es estimado.',
+    );
+  }
 
-        <div class="hero-metrics">
-          <article class="metric metric-primary">
-            <span class="metric-label"><span class="live-dot"></span> BTC / USD</span>
-            <strong id="btc-price" class="metric-value">—</strong>
-            <span class="metric-note">Precio de referencia</span>
-          </article>
-          <article class="metric">
-            <span class="metric-label">BTC Spot</span>
-            <strong id="total-btc" class="metric-value">—</strong>
-            <span class="metric-note">Disponible fuera de derivados</span>
-          </article>
-          <article class="metric">
-            <span class="metric-label">Valor Spot</span>
-            <strong id="total-usd" class="metric-value">—</strong>
-            <span class="metric-note">Estimado al precio actual</span>
-          </article>
-        </div>
-      </section>
+  if (!basis.averagePriceUsd || !btcPriceUsd) {
+    return {
+      btc: round(spotBtc, 8),
+      trackedBtc: basis.trackedBtc,
+      averageBuyPriceUsd: basis.averagePriceUsd,
+      estimatedCostUsd: null,
+      currentValueUsd: btcPriceUsd ? round(spotBtc * btcPriceUsd, 2) : null,
+      estimatedPnlUsd: null,
+      estimatedPnlPercent: null,
+    };
+  }
 
-      <div class="content-grid">
-        <section class="panel spot-panel reveal delay-3" aria-labelledby="spot-title">
-          <div class="panel-heading">
-            <div>
-              <span class="section-index">02 / COST BASIS</span>
-              <h2 id="spot-title">BTC Spot</h2>
-            </div>
-            <span class="panel-chip is-estimate">Estimado</span>
-          </div>
+  const estimatedCostUsd = spotBtc * basis.averagePriceUsd;
+  const currentValueUsd = spotBtc * btcPriceUsd;
+  return {
+    btc: round(spotBtc, 8),
+    trackedBtc: basis.trackedBtc,
+    averageBuyPriceUsd: basis.averagePriceUsd,
+    estimatedCostUsd: round(estimatedCostUsd, 2),
+    currentValueUsd: round(currentValueUsd, 2),
+    estimatedPnlUsd: round(currentValueUsd - estimatedCostUsd, 2),
+    estimatedPnlPercent: round((currentValueUsd / estimatedCostUsd - 1) * 100, 2),
+  };
+}
 
-          <div class="spot-lead">
-            <span>BTC actualmente en Spot</span>
-            <strong id="spot-btc">—</strong>
-          </div>
-          <dl class="data-list">
-            <div><dt>Precio promedio</dt><dd id="average-price">—</dd></div>
-            <div><dt>Costo estimado</dt><dd id="estimated-cost">—</dd></div>
-            <div><dt>Valor actual</dt><dd id="spot-current-value">—</dd></div>
-          </dl>
-          <div class="pnl-card is-neutral" id="spot-pnl-card">
-            <span>PnL Spot estimado</span>
-            <div class="pnl-values">
-              <strong id="spot-pnl">—</strong>
-              <span id="spot-pnl-percent">—</span>
-            </div>
-            <div class="pnl-line" aria-hidden="true"><span></span></div>
-          </div>
-          <p class="method-note">Costo promedio móvil sobre el historial disponible. El balance del exchange manda.</p>
-        </section>
+function calculateSpotAsset(rawAsset, warnings) {
+  const basis = calculateAssetAverageCost(rawAsset.trades, rawAsset.asset);
+  warnings.push(...basis.warnings);
 
-        <section class="panel overview-panel reveal delay-4" aria-labelledby="overview-title">
-          <div class="panel-heading">
-            <div>
-              <span class="section-index">03 / BTC EQUITY</span>
-              <h2 id="overview-title">BTC Overview</h2>
-            </div>
-            <span class="panel-chip is-estimate">At mark</span>
-          </div>
+  if (!nearlyEqual(rawAsset.quantity, basis.trackedQuantity, 0.0000001)) {
+    warnings.push(
+      `${rawAsset.exchange} ${rawAsset.asset}: el balance Spot no coincide con el historial disponible.`,
+    );
+  }
 
-          <div class="overview-comparison">
-            <article class="overview-balance overview-balance-current">
-              <span>BTC neto actual</span>
-              <strong id="overview-current-btc">—</strong>
-              <small><span id="overview-current-usd">—</span> · sin PnL abierto</small>
-            </article>
-            <article id="overview-net-card" class="overview-balance overview-balance-projected is-neutral">
-              <span>BTC neto si cerraras ahora</span>
-              <strong id="overview-net-btc">—</strong>
-              <small id="overview-net-usd">—</small>
-            </article>
-          </div>
-          <div id="overview-impact" class="overview-impact is-neutral">
-           
+  const quantity = round(rawAsset.quantity, 12);
+  const currentPriceUsd = rawAsset.currentPriceUsd
+    ? round(rawAsset.currentPriceUsd, 8)
+    : null;
+  const averageBuyPriceUsd = basis.averagePriceUsd;
+  const estimatedCostUsd = averageBuyPriceUsd ? quantity * averageBuyPriceUsd : null;
+  const currentValueUsd = currentPriceUsd ? quantity * currentPriceUsd : null;
+  const estimatedPnlUsd = estimatedCostUsd && currentValueUsd != null
+    ? currentValueUsd - estimatedCostUsd
+    : null;
+
+  return {
+    exchange: rawAsset.exchange,
+    asset: rawAsset.asset,
+    quantity,
+    quoteAsset: rawAsset.quoteAsset,
+    trackedQuantity: basis.trackedQuantity,
+    averageBuyPriceUsd,
+    currentPriceUsd,
+    estimatedCostUsd: estimatedCostUsd == null ? null : round(estimatedCostUsd, 2),
+    currentValueUsd: currentValueUsd == null ? null : round(currentValueUsd, 2),
+    estimatedPnlUsd: estimatedPnlUsd == null ? null : round(estimatedPnlUsd, 2),
+    estimatedPnlPercent: estimatedPnlUsd == null || !estimatedCostUsd
+      ? null
+      : round((currentValueUsd / estimatedCostUsd - 1) * 100, 2),
+    historyComplete: rawAsset.historyComplete,
+    purchases: buildPurchaseHistory(rawAsset.trades),
+  };
+}
+
+export async function buildDashboard() {
+  console.info('[dashboard] update started');
+  const now = new Date().toISOString();
+  const [priceResult, binanceResult, bingxResult] = await Promise.allSettled([
+    getBinanceBtcPrice(),
+    getBinanceSnapshot(),
+    getBingxSnapshot(),
+  ]);
+
+  if (priceResult.status === 'fulfilled') cache.market = priceResult.value;
+  const btcPriceUsd = priceResult.status === 'fulfilled' ? priceResult.value : cache.market;
+  const binance = sourceResult('binance', binanceResult, now);
+  const bingx = sourceResult('bingx', bingxResult, now);
+  const snapshots = [binance.snapshot, bingx.snapshot].filter(Boolean);
+
+  const warnings = snapshots.flatMap((snapshot) => snapshot.warnings || []);
+  if (priceResult.status === 'rejected') {
+    warnings.push(
+      cache.market
+        ? `Precio BTC sin actualizar: ${safeError(priceResult.reason)}`
+        : `No se pudo obtener el precio BTC: ${safeError(priceResult.reason)}`,
+    );
+  }
+
+  for (const snapshot of snapshots) {
+    if (!snapshot.tradesComplete) {
+      warnings.push(
+        `${snapshot === binance.snapshot ? 'Binance' : 'BingX'}: el historial de trades puede estar incompleto.`,
+      );
+    }
+  }
+
+  const holdings = snapshots
+    .flatMap((snapshot) => snapshot.holdings || [])
+    .map((holding) => ({
+      ...holding,
+      btc: round(holding.btc, 8),
+      usdValue: btcPriceUsd ? round(holding.btc * btcPriceUsd, 2) : null,
+    }));
+  const totalBtc = holdings.reduce((sum, holding) => sum + holding.btc, 0);
+  const spotBtc = holdings
+    .filter((holding) => holding.accountType === 'spot')
+    .reduce((sum, holding) => sum + holding.btc, 0);
+  const trades = snapshots.flatMap((snapshot) => snapshot.trades || []);
+  const positions = snapshots.flatMap((snapshot) => snapshot.positions || []);
+  const spot = calculateSpot(spotBtc, trades, btcPriceUsd, warnings);
+  const collateralBtc = holdings
+    .filter((holding) => holding.accountType === 'coin-m')
+    .reduce((sum, holding) => sum + holding.btc, 0);
+  const btcOverview = calculateBtcOverview({
+    spotBtc,
+    collateralBtc,
+    positions,
+    btcPriceUsd,
+  });
+  const spotAssets = snapshots
+    .flatMap((snapshot) => snapshot.spotAssets || [])
+    .map((asset) => calculateSpotAsset(asset, warnings))
+    .sort((a, b) => (
+      (b.currentValueUsd ?? -1) - (a.currentValueUsd ?? -1)
+      || a.asset.localeCompare(b.asset)
+    ));
+  const rawTradingHistories = snapshots
+    .map((snapshot) => snapshot.tradingHistory)
+    .filter(Boolean);
+  const tradingHistory = buildTradingHistory(
+    rawTradingHistories.flatMap((history) => history.records || []),
+    btcPriceUsd,
+    {
+      days: Math.max(90, ...rawTradingHistories.map((history) => history.days || 0)),
+      startAt: rawTradingHistories
+        .map((history) => history.startAt)
+        .filter(Boolean)
+        .sort()[0] || null,
+      endAt: rawTradingHistories
+        .map((history) => history.endAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null,
+      complete: snapshots.length === 2
+        && rawTradingHistories.length === 2
+        && rawTradingHistories.every((history) => history.complete),
+    },
+  );
+  if (!tradingHistory.period.complete) {
+    warnings.push('Trading History: una o más fuentes no pudieron confirmar el historial completo de 90 días.');
+  }
+  if (tradingHistory.summary.unpricedTrades) {
+    warnings.push(
+      `Trading History: ${tradingHistory.summary.unpricedTrades} cierres no pudieron convertirse a USD (${tradingHistory.summary.unpricedAssets.join(', ')}).`,
+    );
+  }
+
+  console.info('[dashboard] update completed');
+  return {
+    updatedAt: now,
+    market: { btcPriceUsd: btcPriceUsd ? round(btcPriceUsd, 2) : null },
+    portfolio: {
+      totalBtc: round(totalBtc, 8),
+      totalUsd: btcPriceUsd ? round(totalBtc * btcPriceUsd, 2) : null,
+      spotBtc: round(spotBtc, 8),
+      spotUsd: btcPriceUsd ? round(spotBtc * btcPriceUsd, 2) : null,
+    },
+    holdings,
+    spot,
+    btcOverview,
+    spotAssets,
+    positions,
+    tradingHistory,
+    sources: {
+      binance: binance.status,
+      bingx: bingx.status,
+    },
+    warnings: [...new Set(warnings)],
+  };
+}
