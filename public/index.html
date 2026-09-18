@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0a0b09" />
+    <title>Satoshi Ledger — Crypto Dashboard Local</title>
+    <link rel="icon" href="/favicon.svg?v=1" type="image/svg+xml" sizes="any" />
+    <link rel="stylesheet" href="/styles.css?v=2.0.0" />
+    <script src="/app.js?v=2.0.0" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one"></div>
+    <div class="ambient ambient-two"></div>
+
+    <main class="shell">
+      <header class="masthead reveal">
+        <a class="brand" href="#" aria-label="Satoshi Ledger, inicio">
+          <span class="coin-mark" aria-hidden="true">₿</span>
+          <span class="brand-copy">
+            <span class="eyebrow">Local / Read only</span>
+            <span class="wordmark">Satoshi Ledger</span>
+          </span>
+        </a>
+
+        <div class="masthead-actions">
+          <div class="sync-copy">
+            <span class="sync-label">Última actualización</span>
+            <time id="updated-at">Todavía no actualizaste</time>
+            <span id="auto-update-status" class="auto-update-status" aria-live="polite">Auto · iniciando</span>
+          </div>
+          <button id="update-button" class="update-button" type="button" aria-label="Actualizar ahora. Actualización automática cada un minuto.">
+            <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+            </svg>
+            <span class="update-label">Update</span>
+            <span class="auto-update-badge">Auto 1m</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="app-layout">
+        <aside class="primary-navigation reveal delay-1" aria-label="Navegación principal">
+          <div class="nav-heading">
+            <span>MAIN MENU</span>
+            <small>3 secciones</small>
+          </div>
+          <nav class="primary-tabs" role="tablist" aria-label="Secciones principales">
+            <button id="dashboard-tab" class="primary-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="dashboard-view" data-view="dashboard">
+              <span class="nav-index">01</span>
+              <span class="nav-copy"><strong>Dashboard</strong><small>Resumen general</small></span>
+              <span class="nav-arrow" aria-hidden="true">→</span>
+            </button>
+            <button id="spot-history-tab" class="primary-tab" type="button" role="tab" aria-selected="false" aria-controls="spot-history-view" data-view="spot-history">
+              <span class="nav-index">02</span>
+              <span class="nav-copy"><strong>Spot History</strong><small>Compras y costos</small></span>
+              <span class="nav-arrow" aria-hidden="true">→</span>
+            </button>
+            <button id="trading-history-tab" class="primary-tab" type="button" role="tab" aria-selected="false" aria-controls="trading-history-view" data-view="trading-history">
+              <span class="nav-index">03</span>
+              <span class="nav-copy"><strong>Trading History</strong><small>Cierres y PnL</small></span>
+              <span class="nav-arrow" aria-hidden="true">→</span>
+            </button>
+          </nav>
+          <p class="nav-hint"><span aria-hidden="true">↳</span> Elegí una sección para navegar.</p>
+        </aside>
+
+        <div class="app-content">
+          <section class="source-strip global-source-strip reveal delay-1" aria-label="Estado de actualización de fuentes" aria-live="polite">
+            <div class="source-heading">
+              <span class="section-index">LIVE</span>
+              <span>Fuentes</span>
+            </div>
+            <div id="source-binance" class="source-pill is-idle">
+              <span class="source-logo binance-logo">B</span>
+              <span class="source-name">Binance</span>
+              <span class="source-state">En espera</span>
+            </div>
+            <div id="source-bingx" class="source-pill is-idle">
+              <span class="source-logo bingx-logo">X</span>
+              <span class="source-name">BingX</span>
+              <span class="source-state">En espera</span>
+            </div>
+            <span class="source-aside">Estado del último Update · visible en todas las secciones</span>
+          </section>
+
+      <div id="dashboard-view" class="page-view is-active" role="tabpanel" aria-labelledby="dashboard-tab">
+      <section class="hero reveal delay-1" aria-labelledby="portfolio-title">
+        <div class="hero-intro">
+          <p class="section-kicker">Portfolio snapshot</p>
+          <h1 id="portfolio-title">Tu Bitcoin en Spot,<br /><em>sin ruido.</em></h1>
+          <p id="hero-status" class="hero-status">Presioná Update para consultar tus cuentas.</p>
+        </div>
+
+        <div class="hero-metrics">
+          <article class="metric metric-primary">
+            <span class="metric-label"><span class="live-dot"></span> BTC / USD</span>
+            <strong id="btc-price" class="metric-value">—</strong>
+            <span class="metric-note">Precio de referencia</span>
+          </article>
+          <article class="metric">
+            <span class="metric-label">BTC Spot</span>
+            <strong id="total-btc" class="metric-value">—</strong>
+            <span class="metric-note">Disponible fuera de derivados</span>
+          </article>
+          <article class="metric">
+            <span class="metric-label">Valor Spot</span>
+            <strong id="total-usd" class="metric-value">—</strong>
+            <span class="metric-note">Estimado al precio actual</span>
+          </article>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="panel spot-panel reveal delay-3" aria-labelledby="spot-title">
+          <div class="panel-heading">
+            <div>
+              <span class="section-index">02 / COST BASIS</span>
+              <h2 id="spot-title">BTC Spot</h2>
+            </div>
+            <span class="panel-chip is-estimate">Estimado</span>
+          </div>
+
+          <div class="spot-lead">
+            <span>BTC actualmente en Spot</span>
+            <strong id="spot-btc">—</strong>
+          </div>
+          <dl class="data-list">
+            <div><dt>Precio promedio</dt><dd id="average-price">—</dd></div>
+            <div><dt>Costo estimado</dt><dd id="estimated-cost">—</dd></div>
+            <div><dt>Valor actual</dt><dd id="spot-current-value">—</dd></div>
+          </dl>
+          <div class="pnl-card is-neutral" id="spot-pnl-card">
+            <span>PnL Spot estimado</span>
+            <div class="pnl-values">
+              <strong id="spot-pnl">—</strong>
+              <span id="spot-pnl-percent">—</span>
+            </div>
+            <div class="pnl-line" aria-hidden="true"><span></span></div>
+          </div>
+          <p class="method-note">Costo promedio móvil sobre el historial disponible. El balance del exchange manda.</p>
+        </section>
+
+        <section class="panel overview-panel reveal delay-4" aria-labelledby="overview-title">
+          <div class="panel-heading">
+            <div>
+              <span class="section-index">03 / BTC EQUITY</span>
+              <h2 id="overview-title">BTC Overview</h2>
+            </div>
+            <span class="panel-chip is-estimate">At mark</span>
+          </div>
+
+          <div class="overview-comparison">
+            <article class="overview-balance overview-balance-current">
+              <span>BTC neto actual</span>
+              <strong id="overview-current-btc">—</strong>
+              <small><span id="overview-current-usd">—</span> · sin PnL abierto</small>
+            </article>
+            <article id="overview-net-card" class="overview-balance overview-balance-projected is-neutral">
+              <span>BTC neto si cerraras ahora</span>
+              <strong id="overview-net-btc">—</strong>
+              <small id="overview-net-usd">—</small>
+            </article>
+          </div>
+          <div id="overview-impact" class="overview-impact is-neutral">
+            <span>Impacto del PnL abierto</span>
+            <strong id="overview-open-pnl-btc">—</strong>
+            <small id="overview-open-pnl-usd">—</small>
+          </div>
+          <dl class="overview-list">
+            <div>
+              <dt>BTC Spot</dt>
+              <dd><strong id="overview-spot-btc">—</strong><small id="overview-spot-usd">—</small></dd>
+            </div>
+            <div>
+              <dt>Collateral COIN-M</dt>
+              <dd><strong id="overview-collateral-btc">—</strong><small id="overview-collateral-usd">—</small></dd>
+            </div>
+            <div>
+              <dt>PnL COIN-M</dt>
+              <dd id="overview-coinm-pnl" class="overview-pnl is-neutral"><strong>—</strong><small>—</small></dd>
+            </div>
+            <div>
+              <dt>PnL USD-M → BTC</dt>
+              <dd id="overview-usdm-pnl" class="overview-pnl is-neutral"><strong>—</strong><small>—</small></dd>
+            </div>
+          </dl>
+          <p class="method-note">Escenario al mark price actual, antes de comisiones, funding y deslizamiento.</p>
+        </section>
+      </div>
+
+      <section class="panel positions-panel reveal delay-5" aria-labelledby="positions-title">
+        <div class="panel-heading positions-heading">
+          <div>
+            <span class="section-index">04 / DERIVATIVES</span>
+            <h2 id="positions-title">Open Positions</h2>
+          </div>
+          <span id="position-count" class="position-count">0 posiciones</span>
+        </div>
+
+        <div id="positions-total-card" class="positions-total is-neutral" aria-live="polite">
+          <div class="positions-total-primary">
+            <span>Total PnL abierto</span>
+            <strong id="positions-total-usd">—</strong>
+            <small id="positions-total-btc">—</small>
+          </div>
+          <div class="positions-total-detail">
+            <dl>
+              <div>
+                <dt>En positivo</dt>
+                <dd id="positions-positive-usd">—</dd>
+              </div>
+              <div>
+                <dt>En negativo</dt>
+                <dd id="positions-negative-usd">—</dd>
+              </div>
+            </dl>
+            <p id="positions-total-note">COIN-M se convierte a USD al mark price; USD-M se suma directamente.</p>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="positions-table">
+            <thead>
+              <tr>
+                <th>Exchange / Market</th>
+                <th>Pair</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>Mark</th>
+                <th>Size</th>
+                <th>Notional</th>
+                <th>PnL</th>
+                <th>Liq.</th>
+              </tr>
+            </thead>
+            <tbody id="positions-body">
+              <tr class="empty-row"><td colspan="9">Actualizá para ver tus posiciones abiertas.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+
+      <div id="spot-history-view" class="page-view" role="tabpanel" aria-labelledby="spot-history-tab" hidden>
+        <header class="spot-page-intro reveal">
+          <div>
+            <p class="section-kicker">Spot ledger</p>
+            <h1>Compras, costos<br /><em>y rendimiento.</em></h1>
+          </div>
+          <p>Elegí un exchange y una moneda para revisar el precio promedio actual y cada compra ejecutada obtenida desde la API.</p>
+        </header>
+
+        <section class="spot-average-scoreboard reveal delay-2" aria-label="Precio promedio de compra">
+          <article id="purchase-average-card" class="spot-average-card is-empty" aria-live="polite">
+            <span class="section-index">PRECIO PROMEDIO / FILTRO ACTUAL</span>
+            <strong id="purchase-average-price">—</strong>
+            <p id="purchase-average-context">Seleccioná una moneda</p>
+            <div class="spot-average-line" aria-hidden="true"><span></span></div>
+          </article>
+          <div class="spot-average-details">
+            <article>
+              <span>ACTIVO</span>
+              <strong id="spot-average-asset">—</strong>
+              <small>Moneda seleccionada</small>
+            </article>
+            <article>
+              <span>COBERTURA</span>
+              <strong id="spot-average-coverage">—</strong>
+              <small id="spot-average-note">Sin filtro activo</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel spot-assets-panel reveal delay-3" aria-labelledby="spot-assets-title">
+          <div class="panel-heading spot-assets-heading">
+            <div>
+              <span class="section-index">SPOT / PORTFOLIO</span>
+              <h2 id="spot-assets-title">Monedas en Spot</h2>
+              <p class="panel-description">Tenencias actuales y precio promedio según el historial disponible.</p>
+            </div>
+            <div class="spot-filters">
+              <div class="spot-tabs" role="tablist" aria-label="Filtrar monedas Spot por exchange">
+                <button class="spot-tab is-active" type="button" role="tab" aria-selected="true" data-spot-filter="all">Todos</button>
+                <button class="spot-tab" type="button" role="tab" aria-selected="false" data-spot-filter="binance">Binance</button>
+                <button class="spot-tab" type="button" role="tab" aria-selected="false" data-spot-filter="bingx">BingX</button>
+              </div>
+              <label class="currency-filter" for="spot-asset-filter">
+                <span>Moneda</span>
+                <select id="spot-asset-filter" disabled>
+                  <option value="all">Todas las monedas</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="spot-assets-summary">
+            <span id="spot-asset-count">0 monedas</span>
+            <span>Se excluyen saldos en stablecoins</span>
+          </div>
+          <div class="table-wrap">
+            <table class="spot-assets-table">
+              <thead>
+                <tr>
+                  <th>Moneda</th>
+                  <th>Exchange</th>
+                  <th>Cantidad</th>
+                  <th>Precio promedio de compra</th>
+                  <th>Precio actual</th>
+                  <th>Valor actual</th>
+                  <th>PnL estimado</th>
+                  <th>Compras</th>
+                </tr>
+              </thead>
+              <tbody id="spot-assets-body">
+                <tr class="empty-row"><td colspan="8">Actualizá para ver tus monedas en Spot.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <section class="purchase-history" aria-labelledby="purchase-history-title">
+            <div class="purchase-history-heading">
+              <div>
+                <span class="section-index">HISTORIAL API</span>
+                <h3 id="purchase-history-title">Historial de compras</h3>
+                <p id="purchase-history-context">Elegí una moneda o presioná “Ver compras” para consultar sus operaciones.</p>
+              </div>
+              <span id="purchase-history-count" class="position-count">0 compras</span>
+            </div>
+            <div class="table-wrap">
+              <table class="purchase-history-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Exchange</th>
+                    <th>Par</th>
+                    <th>Orden</th>
+                    <th>Cantidad</th>
+                    <th>Precio medio</th>
+                    <th>Monto</th>
+                  </tr>
+                </thead>
+                <tbody id="purchase-history-body">
+                  <tr class="empty-row"><td colspan="7">Seleccioná una moneda para ver todas sus compras ejecutadas.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </div>
+
+      <div id="trading-history-view" class="page-view" role="tabpanel" aria-labelledby="trading-history-tab" hidden>
+        <header class="spot-page-intro trading-page-intro reveal">
+          <div>
+            <p class="section-kicker">Derivatives ledger</p>
+            <h1>Cada cierre.<br /><em>Un solo resultado.</em></h1>
+          </div>
+          <p>Historial realizado de Binance Futures y BingX Perpetual. Las comisiones de cierre ya están descontadas del resultado neto.</p>
+        </header>
+
+        <section class="trading-scoreboard reveal delay-2" aria-label="Resultado general de trading">
+          <article id="trading-net-card" class="trading-net-card is-neutral">
+            <span class="section-index">PNL NETO / FILTRO ACTUAL</span>
+            <strong id="trading-net-pnl">—</strong>
+            <p id="trading-net-context">Actualizá para calcular tu resultado realizado.</p>
+            <div class="result-rule" aria-hidden="true"><span></span></div>
+          </article>
+          <div class="trading-stat-grid">
+            <article class="trading-stat">
+              <span>Ganancias</span>
+              <strong id="trading-gross-profit">—</strong>
+              <small>Suma de cierres positivos</small>
+            </article>
+            <article class="trading-stat">
+              <span>Pérdidas</span>
+              <strong id="trading-gross-loss">—</strong>
+              <small>Suma de cierres negativos</small>
+            </article>
+            <article class="trading-stat">
+              <span>Comisiones</span>
+              <strong id="trading-fees">—</strong>
+              <small>Fees de los cierres</small>
+            </article>
+            <article class="trading-stat">
+              <span>Win rate</span>
+              <strong id="trading-win-rate">—</strong>
+              <small id="trading-win-context">0 de 0 cierres</small>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel trading-history-panel reveal delay-3" aria-labelledby="trading-history-title">
+          <div class="panel-heading trading-history-heading">
+            <div>
+              <span class="section-index">REALIZED PNL / 90 DAYS</span>
+              <h2 id="trading-history-title">Closed Trades</h2>
+              <p id="trading-history-note" class="panel-description">Cada fila corresponde a una ejecución de cierre reportada por el exchange.</p>
+            </div>
+            <div class="trading-filters">
+              <div class="spot-tabs" role="tablist" aria-label="Filtrar cierres por exchange">
+                <button class="spot-tab is-active" type="button" role="tab" aria-selected="true" data-trading-filter="all">Todos</button>
+                <button class="spot-tab" type="button" role="tab" aria-selected="false" data-trading-filter="binance">Binance</button>
+                <button class="spot-tab" type="button" role="tab" aria-selected="false" data-trading-filter="bingx">BingX</button>
+              </div>
+              <label class="currency-filter" for="trading-period-filter">
+                <span>Período</span>
+                <select id="trading-period-filter">
+                  <option value="90" selected>Últimos 90 días</option>
+                  <option value="30">Últimos 30 días</option>
+                  <option value="7">Últimos 7 días</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="spot-assets-summary trading-history-summary">
+            <span id="trading-trade-count">0 cierres</span>
+            <span id="trading-coverage">Historial API disponible</span>
+          </div>
+          <div class="table-wrap">
+            <table class="trading-history-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Exchange / Market</th>
+                  <th>Par</th>
+                  <th>Trade ID</th>
+                  <th>PnL realizado</th>
+                  <th>Fee</th>
+                  <th>Resultado neto</th>
+                </tr>
+              </thead>
+              <tbody id="trading-history-body">
+                <tr class="empty-row"><td colspan="7">Actualizá para ver tus trades cerrados.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="trading-method-note">No incluye funding ni PnL no realizado. Los cierres COIN-M en BTC se convierten a USD al precio de referencia actual y se identifican como estimados.</p>
+        </section>
+      </div>
+
+      <footer>
+        <div class="footer-lock" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+        </div>
+        <p><strong>Solo lectura.</strong> Sin órdenes, sin trading, sin secretos en el browser.</p>
+        <span>Datos en tu computadora</span>
+      </footer>
+        </div>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
